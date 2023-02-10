@@ -11,8 +11,8 @@ using namespace std;
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
 
 struct Document {
-    int id;
-    double relevance;
+	int id;
+	double relevance;
 };
 
 string ReadLine() {
@@ -22,27 +22,27 @@ string ReadLine() {
 }
 
 int ReadLineWithNumber() {
-    int result = 0;
-    cin >> result;
-    ReadLine();
-    return result;
+	int result = 0;
+	cin >> result;
+	ReadLine();
+	return result;
 }
 
 class SearchServer {
 	public:
-        void AddDocument(int document_id, const std::string & document) {
+		void AddDocument(int document_id, const std::string & document) {
 			const std::vector<std::string> words = SplitIntoWordsNoStop(document);
-            for(const auto & w : words) {
+			for(const auto & w : words) {
 				documents_with_tf_[w][document_id] += 1.0 / words.size();
 			}
 			document_count_++;
-        }
+		}
 
-        void SetStopWords(const string& text) {
-            for (const string& word : SplitIntoWords(text)) {
-                stop_words_.insert(word);
-            }
-        }
+		void SetStopWords(const string& text) {
+			for (const string& word : SplitIntoWords(text)) {
+				stop_words_.insert(word);
+			}
+		}
 
 		vector<Document> FindTopDocuments(const string& raw_query) const {
 			const Query query_words = ParseQuery(raw_query);
@@ -59,25 +59,25 @@ class SearchServer {
 
 			return result;
 		}
-    private:
+	private:
 		map<string, map<int, double>> documents_with_tf_; 
-        std::set<std::string> stop_words_;
-        int document_count_ = 0;
+		std::set<std::string> stop_words_;
+		int document_count_ = 0;
 
-        struct Query {
+		struct Query {
 			std::set<string> plus_words;
 			std::set<string> minus_words;
 		};
 
-        vector<string> SplitIntoWordsNoStop(const string& text) const {
-            vector<string> words;
-            for (const string& word : SplitIntoWords(text)) {
-                if (stop_words_.count(word) == 0) {
-                    words.push_back(word);
-                }
-            }
-            return words;
-        }
+		vector<string> SplitIntoWordsNoStop(const string& text) const {
+			vector<string> words;
+			for (const string& word : SplitIntoWords(text)) {
+				if (stop_words_.count(word) == 0) {
+					words.push_back(word);
+				}
+			}
+			return words;
+		}
 
 		Query ParseQuery(const string& text) const {
 			Query query;
@@ -140,13 +140,13 @@ class SearchServer {
 };
 
 SearchServer CreateSearchServer() {
-    SearchServer s;
-    s.SetStopWords(ReadLine());
-    const int document_count = ReadLineWithNumber();
-    for (int document_id = 0; document_id < document_count; ++document_id) {
-        s.AddDocument(document_id, ReadLine());
-    }
-    return s;
+	SearchServer s;
+	s.SetStopWords(ReadLine());
+	const int document_count = ReadLineWithNumber();
+	for (int document_id = 0; document_id < document_count; ++document_id) {
+		s.AddDocument(document_id, ReadLine());
+	}
+	return s;
 }
 
 int main() {
@@ -155,8 +155,8 @@ int main() {
 
 	const string query = ReadLine();
 	for (auto [document_id, relevance] : searchingPetsServer.FindTopDocuments(query)) {
-        cout << "{ document_id = "s << document_id << ", relevance = "s << relevance << " }"s << endl;
-    }
+		cout << "{ document_id = "s << document_id << ", relevance = "s << relevance << " }"s << endl;
+	}
 
 }
 
