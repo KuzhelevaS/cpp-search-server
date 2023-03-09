@@ -444,40 +444,71 @@ void TestMatchingDocumentsForQuery() {
 	{
 		SearchServer server;
 		server.AddDocument(doc_id, content, status, ratings);
-		std::vector<std::string> result_matched;
-		DocumentStatus result_status;
-		tie(result_matched, result_status) = server.MatchDocument("the cat"s, doc_id);
+		const auto [result_matched, result_status] = server.MatchDocument("the cat"s, doc_id);
 		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
-		ASSERT_EQUAL(result_matched.size(), 2u);
-		ASSERT_EQUAL(result_matched.at(0), "cat"s);
-		ASSERT_EQUAL(result_matched.at(1), "the"s);
+		vector<string> waiting_words = {"cat"s, "the"s};
+		ASSERT_EQUAL(result_matched, waiting_words);
 	}
+	
 	// Если есть соответствие хотя бы по одному минус-слову, должен возвращаться пустой список слов.
 	{
 		SearchServer server;
 		server.AddDocument(doc_id, content, status, ratings);
-		std::vector<std::string> result_matched;
-		DocumentStatus result_status;
-		tie(result_matched, result_status) = server.MatchDocument("the cat -in"s, doc_id);
+		const auto [result_matched, result_status] = server.MatchDocument("the cat -in"s, doc_id);
 		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
 		ASSERT_HINT(result_matched.empty(),
 			"Document with minus-words must not be found"s);
+	}
+
+	//Поиск по стоп-слову должен возвращать пустой результат
+	{
+		SearchServer server;
+		server.SetStopWords("in the"s);
+		server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+		const auto [result_matched, result_status] = server.MatchDocument("in"s, doc_id);
+		ASSERT_HINT(result_matched.empty(),
+			"Don't matching by stop-words"s);
+	}
+
+	//Если если минус-слово входит в список стоп-слов, оно должно быть просто проигнорировано
+	{
+		SearchServer server;
+		server.SetStopWords("in the"s);
+		server.AddDocument(doc_id, content, status, ratings);
+		const auto [result_matched, result_status] = server.MatchDocument("-the cat"s, doc_id);
+		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
+		vector<string> waiting_words = {"cat"s};
+		ASSERT_EQUAL(result_matched, waiting_words);
 	}
 }
 
 // Тест проверяет сортировку по релевантности
 void TestSortingOfSearchingResultByRelevance() {
-	SearchServer search_server;
-	search_server.AddDocument(0, "white cat black hat"s, DocumentStatus::ACTUAL, {8, -3}); // tf-idf = 0.245207313252932
-	search_server.AddDocument(1, "black dog green eyes"s, DocumentStatus::ACTUAL, {7, 2, 7}); // tf-idf = 0.0719205181129452
-	search_server.AddDocument(2, "black cat with name cat"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0.334795286714334
-	search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0
+	// Если у всех документов разная релевантность
+	{
+		SearchServer search_server;
+		search_server.AddDocument(0, "white cat black hat"s, DocumentStatus::ACTUAL, {8, -3}); // tf-idf = 0.245207313252932
+		search_server.AddDocument(1, "black dog green eyes"s, DocumentStatus::ACTUAL, {7, 2, 7}); // tf-idf = 0.0719205181129452
+		search_server.AddDocument(2, "black cat with name cat"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0.334795286714334
+		search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0
 
-	vector<Document> result_documents = search_server.FindTopDocuments("black cat"s);
-	ASSERT_EQUAL(result_documents.size(), 3u);
-	ASSERT_EQUAL(result_documents.at(0).id, 2);
-	ASSERT_EQUAL(result_documents.at(1).id, 0);
-	ASSERT_EQUAL(result_documents.at(2).id, 1);
+		vector<Document> result_documents = search_server.FindTopDocuments("black cat"s);
+		ASSERT_EQUAL(result_documents.size(), 3u);
+		ASSERT(result_documents.at(0).relevance > result_documents.at(1).relevance);
+		ASSERT(result_documents.at(1).relevance > result_documents.at(2).relevance);
+	}
+	// Если одинаковая релевантность, сортируем по рейтингу
+	{
+		SearchServer search_server;
+		search_server.AddDocument(0, "white cat with hat"s, DocumentStatus::ACTUAL, {8, -3});
+		search_server.AddDocument(1, "black dog green eyes"s, DocumentStatus::ACTUAL, {7, 2, 7});
+		search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0
+
+		vector<Document> result_documents = search_server.FindTopDocuments("black cat"s);
+		ASSERT_EQUAL(result_documents.size(), 2u);
+		ASSERT(abs(result_documents.at(0).relevance - result_documents.at(1).relevance) < EPSILON);
+		ASSERT(result_documents.at(0).rating >= result_documents.at(1).rating);
+	}
 }
 
 //Тест проверяет расчет рейтинга как среднее арифметическое
@@ -485,20 +516,22 @@ void TestСalculationDocumentRating() {
 	// Все числа положительные
 	{
 		SearchServer server;
-		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {7, 2, 7});
-		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, 5);
+		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {7, 2});
+		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, (7 + 2) / 2);
 	}
+	
 	// Все числа отрицательные
 	{
 		SearchServer server;
-		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {-7, -2, -7});
-		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, -5);
+		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {-7, -2});
+		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, (-7 + -2) / 2);
 	}
+	
 	// Есть и положительные, и отрицательные числа
 	{
 		SearchServer server;
-		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {-8, 3});
-		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, -2);
+		server.AddDocument(0, "dog"s, DocumentStatus::ACTUAL, {-7, 2});
+		ASSERT_EQUAL(server.FindTopDocuments("dog"s).at(0).rating, (-7 + 2) / 2);
 	}
 }
 
@@ -524,6 +557,7 @@ void TestPredicatInFindTopDocument() {
 		ASSERT_EQUAL(predicate_test_id.size(), 1u);
 		ASSERT_EQUAL(predicate_test_id.at(0).id, 42);
 	}
+	
 	// тестируем параметр status
 	{
 		SearchServer server;
@@ -536,6 +570,7 @@ void TestPredicatInFindTopDocument() {
 		ASSERT_EQUAL(predicate_test_status.size(), 1u);
 		ASSERT_EQUAL(predicate_test_status.at(0).id, 33);
 	}
+	
 	// тестируем параметр rating
 	{
 		SearchServer server;
@@ -561,6 +596,7 @@ void TestFindingDocumentsByStatus() {
 		ASSERT_EQUAL(result_by_status.size(), 1u);
 		ASSERT_EQUAL(result_by_status.at(0).id, 5);
 	}
+	
 	// ситуация, когда подходящих документов нет
 	{
 		SearchServer server;
@@ -574,16 +610,25 @@ void TestFindingDocumentsByStatus() {
 //Корректное вычисление релевантности найденных документов.
 void TestCalculateRelevanceOfFindingDocs() {
 	SearchServer search_server;
-	search_server.AddDocument(0, "black dog green eyes"s, DocumentStatus::ACTUAL, {7, 2, 7}); // tf-idf = 0.0719205181129452
-	search_server.AddDocument(1, "white cat black hat"s, DocumentStatus::ACTUAL, {8, -3}); // tf-idf = 0.245207313252932
-	search_server.AddDocument(2, "black cat with name cat"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0.334795286714334
+	search_server.AddDocument(0, "black dog green eyes"s, DocumentStatus::ACTUAL, {7, 2, 7});  
 	search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {5, -12, 2, 1}); // tf-idf = 0
 
 	vector<Document> result_documents = search_server.FindTopDocuments("black cat"s);
-	ASSERT_EQUAL(result_documents.size(), 3u);
-	ASSERT(abs(result_documents.at(0).relevance - 0.334795286714334) < EPSILON);
-	ASSERT(abs(result_documents.at(1).relevance - 0.245207313252932) < EPSILON);
-	ASSERT(abs(result_documents.at(2).relevance - 0.0719205181129452) < EPSILON);
+	ASSERT_EQUAL(result_documents.size(), 1u);
+	const double idf_black = log(2.0 / 1.0); //all docs / docs with word
+	const double tf_black_in_doc = 1.0 / 4.0; // query word in doc / all words in doc
+	const double waiting_idf_tf = idf_black * tf_black_in_doc; // idf-tf for cat is 0
+	ASSERT(abs(result_documents.at(0).relevance - waiting_idf_tf) < EPSILON);
+}
+
+// Тест проверяет изменение количества документов при добавлении
+void TestDocumentCountBeforeAndAfterAdding() {
+	SearchServer search_server;
+	ASSERT_EQUAL_HINT(search_server.GetDocumentCount(), 0,
+		"Before first adding the number of documents must be zero"s);
+	search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {1});
+	ASSERT_EQUAL_HINT(search_server.GetDocumentCount(), 1,
+		"After adding the number of documents must increase"s);
 }
 
 // Функция TestSearchServer является точкой входа для запуска тестов
@@ -596,6 +641,7 @@ void TestSearchServer() {
 	RUN_TEST(TestPredicatInFindTopDocument);
 	RUN_TEST(TestFindingDocumentsByStatus);
 	RUN_TEST(TestCalculateRelevanceOfFindingDocs);
+	RUN_TEST(TestDocumentCountBeforeAndAfterAdding);
 }
 
 // --------- Окончание модульных тестов поисковой системы -----------
