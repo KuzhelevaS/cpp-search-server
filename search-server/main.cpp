@@ -57,10 +57,30 @@ int ReadLineWithNumber() {
 	return result;
 }
 
+//Разбивает строку на массив строк, разделитель пробел(ы)
+vector<string> SplitIntoWords(const string& text) {
+	vector<string> words;
+	string word = ""s;
+	for (const char c : text) {
+		if (c == ' ') {
+			if (!word.empty()) {
+				words.push_back(word);
+				word.clear();
+			}
+		} else {
+			word += c;
+		}
+	}
+	if (!word.empty()) {
+		words.push_back(word);
+	}
+	return words;
+}
+
 class SearchServer {
 	public:
 		SearchServer(const string& text = ""s)
-			: stop_words_(MakeStopWords(SplitIntoWords(text)))
+			: SearchServer((SplitIntoWords(text)))
 		{}
 
 		template <typename Container>
@@ -113,9 +133,8 @@ class SearchServer {
 				[](const Document & lhs, const Document & rhs) {
 					if (abs(lhs.relevance - rhs.relevance) < EPSILON) {
 						return lhs.rating > rhs.rating;
-					} else {
-						return lhs.relevance > rhs.relevance;
 					}
+					return lhs.relevance > rhs.relevance;
 				});
 
 			if (result.size() > MAX_RESULT_DOCUMENT_COUNT) {
@@ -298,26 +317,6 @@ class SearchServer {
 		bool HasWordInDocument(const string & word, int document_id) const {
 			return documents_with_tf_.count(word) != 0
 				&& documents_with_tf_.at(word).count(document_id) != 0;
-		}
-
-		//Разбивает строку на массив строк, разделитель пробел(ы)
-		static vector<string> SplitIntoWords(const string& text) {
-			vector<string> words;
-			string word = ""s;
-			for (const char c : text) {
-				if (c == ' ') {
-					if (!word.empty()) {
-						words.push_back(word);
-						word.clear();
-					}
-				} else {
-					word += c;
-				}
-			}
-			if (!word.empty()) {
-				words.push_back(word);
-			}
-			return words;
 		}
 
 		template <typename WordsContainer>
