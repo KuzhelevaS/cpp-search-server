@@ -14,7 +14,7 @@ void SearchServer::AddDocument(int document_id, const std::string & document,
 	if (document_id < 0) {
 		throw std::invalid_argument("Id less then zero");
 	}
-	if (document_info_.count(document_id)) {
+	if (documents_info_.count(document_id)) {
 		throw std::invalid_argument("Document with this id already exists");
 	}
 
@@ -22,12 +22,12 @@ void SearchServer::AddDocument(int document_id, const std::string & document,
 	if (!IsValidAllWords(words)) {
 		throw std::invalid_argument("Document contain special characters");
 	}
-	adding_history_.push_back(document_id);
-	document_count_++;
-	document_info_[document_id] = {ComputeAverageRating(ratings), status};
+	documents_id_.insert(document_id);
+	documents_info_[document_id] = {ComputeAverageRating(ratings), status, {}};
 	double tf_coeff = 1.0 / static_cast<double>(words.size());
 	for(const auto & word : words) {
 		documents_with_tf_[word][document_id] += tf_coeff;
+		documents_info_[document_id].words[word] += tf_coeff;
 	}
 }
 
@@ -38,14 +38,6 @@ std::vector<Document> SearchServer::FindTopDocuments(const std::string & raw_que
 		[status](int, DocumentStatus document_status, int) {
 			return document_status == status;
 		});
-}
-
-int SearchServer::GetDocumentCount() const {
-	return static_cast<int>(document_info_.size());
-}
-
-int SearchServer::GetDocumentId(int index) const {
-	return adding_history_.at(static_cast<unsigned>(index));
 }
 
 std::tuple<std::vector<std::string>, DocumentStatus> SearchServer::MatchDocument(
@@ -69,7 +61,47 @@ std::tuple<std::vector<std::string>, DocumentStatus> SearchServer::MatchDocument
 		}
 		std::sort(matched_words.begin(), matched_words.end());
 	}
-	return std::tie(matched_words, document_info_.at(document_id).status);
+	DocumentStatus result_status = documents_info_.count(document_id)
+		? documents_info_.at(document_id).status
+		: DocumentStatus::REMOVED;
+	return std::tie(matched_words, result_status);
+}
+
+int SearchServer::GetDocumentCount() const {
+	return static_cast<int>(documents_info_.size());
+}
+
+std::set<int>::const_iterator SearchServer::begin() const {
+	return documents_id_.begin();
+}
+
+std::set<int>::const_iterator SearchServer::end() const {
+	return documents_id_.end();
+}
+
+const std::map<std::string, double> & SearchServer::GetWordFrequencies(int document_id) const {
+	static const std::map<std::string, double> empty_words;
+	if (!documents_info_.count(document_id)) {
+		return empty_words;
+	}
+	return documents_info_.at(document_id).words;
+}
+
+void SearchServer::RemoveDocument(int document_id) {
+	documents_id_.erase(document_id);
+	if (documents_info_.count(document_id)) {
+		std::vector<std::string> words_without_document;
+		for (auto [word, tf] : documents_info_.at(document_id).words) {
+			documents_with_tf_.at(word).erase(document_id);
+			if (documents_with_tf_.at(word).empty()) {
+				words_without_document.push_back(word);
+			}
+		}
+		for (auto word : words_without_document) {
+			documents_with_tf_.erase(word);
+		}
+		documents_info_.erase(document_id);
+	}
 }
 
 bool SearchServer::IsStopWord(const std::string & word) const {
@@ -132,7 +164,7 @@ SearchServer::Query SearchServer::ParseQuery(const std::string & text) const {
 }
 
 double SearchServer::CalcIdf(const std::string & word) const {
-	return std::log(static_cast<double>(document_count_)
+	return std::log(static_cast<double>(documents_info_.size())
 		/ static_cast<double>(documents_with_tf_.at(word).size()));
 }
 

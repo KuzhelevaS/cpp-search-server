@@ -15,6 +15,7 @@ public:
 	std::vector<Document> AddFindRequest(const std::string & raw_query, DocumentPredicate document_predicate);
 	std::vector<Document> AddFindRequest(const std::string & raw_query, DocumentStatus status);
 	std::vector<Document> AddFindRequest(const std::string & raw_query);
+	
 	int GetNoResultRequests() const;
 private:
 	struct QueryResult {

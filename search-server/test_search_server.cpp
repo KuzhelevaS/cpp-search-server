@@ -310,6 +310,25 @@ void TestCalculateRelevanceOfFindingDocs() {
 	ASSERT(std::abs(result_documents.at(0).relevance - waiting_idf_tf) < EPSILON);
 }
 
+//Корректное вычисление частоты теримнов TF (term frequency) слов в документе
+void TestWordsTfInDocument() {
+	int doc_id = 1;
+	SearchServer search_server;
+	search_server.AddDocument(doc_id, "big dog big eyes"s, DocumentStatus::ACTUAL, {7, 2, 7});
+
+	// Проверяему существующий документ
+	std::map<std::string, double> words_tf = {
+		{"big", 2.0 / 4.0},
+		{"dog", 1.0 / 4.0},
+		{"eyes", 1.0 / 4.0},
+	};
+	ASSERT_EQUAL(search_server.GetWordFrequencies(doc_id), words_tf);
+
+	// Проверяему нусуществующий документ
+	std::map<std::string, double> words_tf_empty = {};
+	ASSERT_EQUAL(search_server.GetWordFrequencies(2), words_tf_empty);
+}
+
 // Тест проверяет исключения в конструкторе
 void TestCreateSearchServer() {
 	// Проверяем исключение при создании сервера без стоп-слов
@@ -490,8 +509,8 @@ void TestReturnCodesFromFindTopDocuments() {
 	ASSERT(has_invalid_argument_exception_if_find_special_characters);
 }
 
-// Тест функции GetDocumentId
-void TestGetDocumentId() {
+// Тест функций begin и end
+void TestBeginEnd() {
 	SearchServer search_server;
 	int doc_id_0 = 3333;
 	int doc_id_1 = 3;
@@ -500,28 +519,48 @@ void TestGetDocumentId() {
 	search_server.AddDocument(doc_id_1, "lion"s, DocumentStatus::ACTUAL, {1});
 	search_server.AddDocument(doc_id_2, "lion"s, DocumentStatus::ACTUAL, {1});
 
-	ASSERT_EQUAL(search_server.GetDocumentId(0), doc_id_0);
-	ASSERT_EQUAL(search_server.GetDocumentId(1), doc_id_1);
-	ASSERT_EQUAL(search_server.GetDocumentId(2), doc_id_2);
+	std::set<int> history_set = {doc_id_0, doc_id_1, doc_id_2};
+	const std::vector<int> history(history_set.begin(), history_set.end());
+	//Ожидаем 3 корректные проверки
+	unsigned i = 0;
+	for (const int document_id : search_server) {
+		ASSERT_EQUAL(document_id, history.at(i));
+		++i;
+	}
+}
 
-	// Проверяем исключение, если индекс отрицательный
-	bool has_out_of_range_exception_if_doc_index_less_zero = false;
-	try {
-		search_server.GetDocumentId(-1);
-	} catch (const std::out_of_range & exception) {
-		has_out_of_range_exception_if_doc_index_less_zero = true;
-	} catch (...) {}
-	ASSERT(has_out_of_range_exception_if_doc_index_less_zero);
+// Тест проверяет корректность удаление документа
+void TestRemoveDocument() {
+	SearchServer search_server;
+	int before_id = 1;
+	int deleted_id = 3;
+	int after_id = 5;
+	search_server.AddDocument(before_id, "dog and cat"s, DocumentStatus::ACTUAL, {1});
+	search_server.AddDocument(deleted_id, "cat"s, DocumentStatus::ACTUAL, {1});
+	search_server.AddDocument(after_id, "cat"s, DocumentStatus::ACTUAL, {1});
+	search_server.RemoveDocument(deleted_id);
 
-	// Проверяем исключение, если индекс больше, чем число документов
-	bool has_out_of_range_exception_if_doc_index_more_doc_amount = false;
-	try {
-		search_server.GetDocumentId(3);
-	} catch (const std::out_of_range & exception) {
-		has_out_of_range_exception_if_doc_index_more_doc_amount = true;
-	} catch (...) {}
-	ASSERT(has_out_of_range_exception_if_doc_index_more_doc_amount);
+	// Проверяем, что после удаления уменьшилось количество документов
+	ASSERT_EQUAL(search_server.GetDocumentCount(), 2);
 
+	// Проверяем, что после удаления id не доступен через итератор
+	std::vector<int> after_deleting_ids = {before_id, after_id};
+	unsigned i = 0;
+	for (auto doc_id : search_server) {
+		ASSERT_EQUAL(doc_id, after_deleting_ids.at(i));
+		++i;
+	}
+
+	// Проверяем, что matching возвращает пустой вектор слов по удалённому id
+	auto [matching_string, status] = search_server.MatchDocument("cat"s, deleted_id);
+	std::vector<std::string> empty_matching = {};
+	ASSERT_EQUAL(matching_string, empty_matching);
+
+	// Проверяем, что FindTopDocuments не находит удаленный документ
+	auto finding_result = search_server.FindTopDocuments("cat"s);
+	ASSERT_EQUAL(finding_result.size(), 2u);
+	ASSERT_EQUAL(finding_result.at(0).id, before_id);
+	ASSERT_EQUAL(finding_result.at(1).id, after_id);
 }
 
 void TestSearchServer() {
@@ -536,5 +575,7 @@ void TestSearchServer() {
 	RUN_TEST(TestPredicateInFindTopDocument);
 	RUN_TEST(TestFindingDocumentsByStatus);
 	RUN_TEST(TestCalculateRelevanceOfFindingDocs);
-	RUN_TEST(TestGetDocumentId);
+	RUN_TEST(TestWordsTfInDocument);
+	RUN_TEST(TestBeginEnd);
+	RUN_TEST(TestRemoveDocument);
 }

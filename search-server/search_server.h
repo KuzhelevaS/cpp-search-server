@@ -30,27 +30,32 @@ public:
 	template <typename Filter>
 	std::vector<Document> FindTopDocuments(const std::string & raw_query, Filter filter) const;
 
-	// Возвращает количество документов
-	int GetDocumentCount() const;
-
-	// Возвращает ID документа по очередности добавления
-	int GetDocumentId(int index) const;
-
 	// Возвращает статус документа и слова запроса, содержащиеся в документе с заданным ID
 	std::tuple<std::vector<std::string>, DocumentStatus> MatchDocument(
 		const std::string & raw_query, int document_id) const;
 
+	// Возвращает количество документов
+	int GetDocumentCount() const;
+
+	// Итераторы для перебора id документов
+	std::set<int>::const_iterator begin() const;
+	std::set<int>::const_iterator end() const;
+
+	const std::map<std::string, double> & GetWordFrequencies(int document_id) const;
+
+	void RemoveDocument(int document_id);
+
 private:
 	std::map<std::string, std::map<int, double>> documents_with_tf_; // слово - id док-та, tf
 	std::set<std::string> stop_words_;
-	int document_count_ = 0;
 
 	struct DocumentInfo {
 		int rating;
 		DocumentStatus status;
+		std::map<std::string, double> words;
 	};
-	std::map<int, DocumentInfo> document_info_;
-	std::vector<int> adding_history_;
+	std::map<int, DocumentInfo> documents_info_;
+	std::set<int> documents_id_;
 
 	struct Query {
 		std::set<std::string> plus_words;
@@ -161,10 +166,10 @@ std::vector<Document> SearchServer::FindAllDocuments(const Query & query_words, 
 	std::vector<Document> result;
 	for (const auto & [id, rel] : matched_documents) {
 		if (filter(id,
-			document_info_.at(id).status,
-			document_info_.at(id).rating))
+			documents_info_.at(id).status,
+			documents_info_.at(id).rating))
 		{
-			int rating = document_info_.at(id).rating;
+			int rating = documents_info_.at(id).rating;
 			result.push_back({id, rel, rating});
 		}
 	}

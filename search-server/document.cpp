@@ -9,7 +9,7 @@ std::string StatusAsString(DocumentStatus status) {
 		case DocumentStatus::IRRELEVANT :
 			return "IRRELEVANT"s;
 		case DocumentStatus::BANNED :
-			return "BANNEDL"s;
+			return "BANNED"s;
 		case DocumentStatus::REMOVED :
 			return "REMOVED"s;
 		default:
