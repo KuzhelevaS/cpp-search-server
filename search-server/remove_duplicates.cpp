@@ -9,11 +9,13 @@ using std::literals::string_literals::operator""s;
 
 void RemoveDuplicates(SearchServer& search_server) {
 	std::vector<int> duplicates;
-	std::set<std::set<std::string>> scanned;
+	std::set<std::vector<std::string>> scanned;
 	for (int document_id : search_server) {
-		std::set<std::string> document_words;
+		// Т.к. GetWordFrequencies возвращает map, то слова будут без дублей
+		// поэтому используем vector для быстрой вставки элементов
+		std::vector<std::string> document_words;
 		for (const auto& [word, freq] : search_server.GetWordFrequencies(document_id)) {
-			document_words.insert(word);
+			document_words.push_back(word);
 		}
 		if (scanned.count(document_words)) {
 			duplicates.push_back(document_id);
