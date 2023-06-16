@@ -1,6 +1,6 @@
 #include "log_duration.h"
 
-LogDuration::LogDuration(const std::string& id, std::ostream & out)
+LogDuration::LogDuration(std::string_view id, std::ostream & out)
 	: id_(id), out_(out)
 {}
 

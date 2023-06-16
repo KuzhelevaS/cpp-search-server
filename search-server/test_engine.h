@@ -101,6 +101,13 @@ template <typename Key, typename Value>
 std::ostream & operator << (std::ostream & out, const std::map<Key,Value> & m) {
 	out << "{"s;
 	Print(out, m);
+	return out;
+}
+
+template <typename Key, typename Value, typename Less>
+std::ostream & operator << (std::ostream & out, const std::map<Key,Value,Less> & m) {
+	out << "{"s;
+	Print(out, m);
 	out << "}"s;
 	return out;
 }

@@ -4,6 +4,15 @@
 #include <vector>
 #include <cmath>
 
+template <typename ExecutionPolicy>
+std::string PolicyToString([[maybe_unused]]const ExecutionPolicy & policy) {
+	if constexpr (std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_policy>) {
+		return "parallel version";
+	} else {
+		return "sequenced version";
+	}
+}
+
 // Тест проверяет, что поисковая система исключает стоп-слова при добавлении документов
 void TestExcludeStopWordsFromAddedDocumentContent() {
 	const int doc_id = 42;
@@ -83,7 +92,10 @@ void TestExcludeDocumentsWithMinusWordsFromTopDocuments() {
 }
 
 // Тест проверяет, соответствие документа поисковому запросу
-void TestMatchingDocumentsForQuery() {
+template <typename ExecutionPolicy>
+void TestMatchingDocumentsForQueryPolicy(const ExecutionPolicy & policy) {
+	std::string policy_str = PolicyToString(policy);
+
 	// При матчинге документа по поисковому запросу
 	// должны быть возвращены все слова из поискового запроса, присутствующие в документе.
 	const int doc_id = 42;
@@ -93,38 +105,38 @@ void TestMatchingDocumentsForQuery() {
 	{
 		SearchServer server;
 		server.AddDocument(doc_id, content, status, ratings);
-		const auto [result_matched, result_status] = server.MatchDocument("the cat"s, doc_id);
-		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
-		std::vector<std::string> waiting_words = {"cat"s, "the"s};
-		ASSERT_EQUAL(result_matched, waiting_words);
+		const auto [result_matched, result_status] = server.MatchDocument(policy, "the cat"s, doc_id);
+		ASSERT_EQUAL_HINT(StatusAsString(result_status), StatusAsString(status), policy_str);
+		std::vector<std::string_view> waiting_words {"cat", "the"};
+		ASSERT_EQUAL_HINT(result_matched, waiting_words, policy_str);
 	}
 	// Если есть соответствие хотя бы по одному минус-слову, должен возвращаться пустой список слов.
 	{
 		SearchServer server;
 		server.AddDocument(doc_id, content, status, ratings);
 		const auto [result_matched, result_status] = server.MatchDocument("the cat -in"s, doc_id);
-		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
+		ASSERT_EQUAL_HINT(StatusAsString(result_status), StatusAsString(status), policy_str);
 		ASSERT_HINT(result_matched.empty(),
-			"Document with minus-words must not be found"s);
+			("Document with minus-words must not be found "s + policy_str));
 	}
 
 	//Поиск по стоп-слову должен возвращать пустой результат
 	{
 		SearchServer server("in the"s);
 		server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
-		const auto [result_matched, result_status] = server.MatchDocument("in"s, doc_id);
+		const auto [result_matched, result_status] = server.MatchDocument(policy, "in"s, doc_id);
 		ASSERT_HINT(result_matched.empty(),
-			"Don't matching by stop-words"s);
+			("Don't matching by stop-words "s + policy_str));
 	}
 
 	//Если если минус-слово входит в список стоп-слов, оно должно быть просто проигнорировано
 	{
 		SearchServer server("in the"s);
 		server.AddDocument(doc_id, content, status, ratings);
-		const auto [result_matched, result_status] = server.MatchDocument("-the cat"s, doc_id);
-		ASSERT_EQUAL(StatusAsString(result_status), StatusAsString(status));
-		std::vector<std::string> waiting_words = {"cat"s};
-		ASSERT_EQUAL(result_matched, waiting_words);
+		const auto [result_matched, result_status] = server.MatchDocument(policy, "-the cat"s, doc_id);
+		ASSERT_EQUAL_HINT(StatusAsString(result_status), StatusAsString(status), policy_str);
+		std::vector<std::string_view> waiting_words {"cat"};
+		ASSERT_EQUAL_HINT(result_matched, waiting_words, policy_str);
 	}
 
 	//Проверяем, что функция корректно отрабатывает ошибочные входные данные
@@ -135,42 +147,57 @@ void TestMatchingDocumentsForQuery() {
 		// В корректном запросе отсутствуют исключения
 		bool has_exception_if_match_correct_query = false;
 		try {
-			server.MatchDocument("-the cat"s, doc_id);
+			server.MatchDocument(policy, "-the cat"s, doc_id);
 		} catch (...) {
 			has_exception_if_match_correct_query = true;
 		}
-		ASSERT(!has_exception_if_match_correct_query);
+		ASSERT_HINT(!has_exception_if_match_correct_query, policy_str);
 
 		// Проверяем исключение, если минус-слово содержит 2 минуса подряд
 		bool has_invalid_argument_exception_if_match_two_minus = false;
 		try {
-			server.MatchDocument("--the cat"s, doc_id);
+			server.MatchDocument(policy, "--the cat"s, doc_id);
 		} catch (const std::invalid_argument & exception) {
 			has_invalid_argument_exception_if_match_two_minus = true;
 		} catch (...) {
 		}
-		ASSERT(has_invalid_argument_exception_if_match_two_minus);
+		ASSERT_HINT(has_invalid_argument_exception_if_match_two_minus, policy_str);
 
 		// Проверяем исключение, если в запросе пустое минус-слово
 		bool has_invalid_argument_exception_if_match_empty_minus = false;
 		try {
-			server.MatchDocument("black -"s, doc_id);
+			server.MatchDocument(policy, "black -"s, doc_id);
 		} catch (const std::invalid_argument & exception) {
 			has_invalid_argument_exception_if_match_empty_minus = true;
 		} catch (...) {
 		}
-		ASSERT(has_invalid_argument_exception_if_match_empty_minus);
+		ASSERT_HINT(has_invalid_argument_exception_if_match_empty_minus, policy_str);
 
 		// Проверяем исключение, если в запросе слово со спец.символами
 		bool has_invalid_argument_exception_if_match_special_characters = false;
 		try {
-			server.MatchDocument("do\x12g"s, doc_id);
+			server.MatchDocument(policy, "do\x12g"s, doc_id);
 		} catch (const std::invalid_argument & exception) {
 			has_invalid_argument_exception_if_match_special_characters = true;
 		} catch (...) {
 		}
-		ASSERT(has_invalid_argument_exception_if_match_special_characters);
+		ASSERT_HINT(has_invalid_argument_exception_if_match_special_characters, policy_str);
+
+		// Проверяем исключение, если получили запрос с несуществующим id
+		bool has_out_of_range_exception_if_document_id_not_exist = false;
+		try {
+			server.MatchDocument(policy, content, doc_id * 2);
+		} catch (const std::out_of_range & exception) {
+			has_out_of_range_exception_if_document_id_not_exist = true;
+		} catch (...) {
+		}
+		ASSERT_HINT(has_out_of_range_exception_if_document_id_not_exist, policy_str);
 	}
+}
+
+void TestMatchingDocumentsForQuery() {
+	TestMatchingDocumentsForQueryPolicy(std::execution::seq);
+	TestMatchingDocumentsForQueryPolicy(std::execution::par);
 }
 
 // Тест проверяет сортировку по релевантности
@@ -225,7 +252,10 @@ void TestСalculationDocumentRating() {
 }
 
 //Фильтрация результатов поиска с использованием предиката, задаваемого пользователем.
-void TestPredicateInFindTopDocument() {
+template <typename ExecutionPolicy>
+void TestPredicateInFindTopDocumentPolicy(const ExecutionPolicy & policy) {
+	std::string policy_str = PolicyToString(policy);
+
 	const int doc_id_1 = 42;
 	const int doc_id_2 = 33;
 	const std::string content_1 = "cat in the city"s;
@@ -239,61 +269,70 @@ void TestPredicateInFindTopDocument() {
 		SearchServer server;
 		server.AddDocument(doc_id_1, content_1, status_1, ratings_1);
 		server.AddDocument(doc_id_2, content_2, status_2, ratings_2);
-		auto predicate_test_id = server.FindTopDocuments("cat"s,[](int document_id,
-			DocumentStatus, int)
-		{
-			return document_id % 2 == 0;
-		});
-		ASSERT_EQUAL(predicate_test_id.size(), 1u);
-		ASSERT_EQUAL(predicate_test_id.at(0).id, 42);
+		auto predicate_test_id = server.FindTopDocuments(policy, "cat"s,
+			[](int document_id, DocumentStatus, int) {
+				return document_id % 2 == 0;
+			});
+		ASSERT_EQUAL_HINT(predicate_test_id.size(), 1u, policy_str);
+		ASSERT_EQUAL_HINT(predicate_test_id.at(0).id, 42, policy_str);
 	}
 	// тестируем параметр status
 	{
 		SearchServer server;
 		server.AddDocument(doc_id_1, content_1, status_1, ratings_1);
 		server.AddDocument(doc_id_2, content_2, status_2, ratings_2);
-		auto predicate_test_status = server.FindTopDocuments("cat"s,[](int,
-			DocumentStatus status, int )
-		{
-			return status == DocumentStatus::BANNED;
-		});
-		ASSERT_EQUAL(predicate_test_status.size(), 1u);
-		ASSERT_EQUAL(predicate_test_status.at(0).id, 33);
+		auto predicate_test_status = server.FindTopDocuments(policy, "cat"s,
+			[](int, DocumentStatus status, int ) {
+				return status == DocumentStatus::BANNED;
+			});
+		ASSERT_EQUAL_HINT(predicate_test_status.size(), 1u, policy_str);
+		ASSERT_EQUAL_HINT(predicate_test_status.at(0).id, 33, policy_str);
 	}
 	// тестируем параметр rating
 	{
 		SearchServer server;
 		server.AddDocument(doc_id_1, content_1, status_1, ratings_1);
 		server.AddDocument(doc_id_2, content_2, status_2, ratings_2);
-		auto predicate_test_rating = server.FindTopDocuments("cat"s,[](int,
-			DocumentStatus, int rating)
-		{
-			return rating >= 2;
-		});
-		ASSERT_EQUAL(predicate_test_rating.size(), 2u);
-		ASSERT_EQUAL(predicate_test_rating.at(0).id, 33);
-		ASSERT_EQUAL(predicate_test_rating.at(1).id, 42);
+		auto predicate_test_rating = server.FindTopDocuments(policy, "cat"s,
+			[](int, DocumentStatus, int rating) {
+				return rating >= 2;
+			});
+		ASSERT_EQUAL_HINT(predicate_test_rating.size(), 2u, policy_str);
+		ASSERT_EQUAL_HINT(predicate_test_rating.at(0).id, 33, policy_str);
+		ASSERT_EQUAL_HINT(predicate_test_rating.at(1).id, 42, policy_str);
 	}
 }
 
+void TestPredicateInFindTopDocument() {
+	TestPredicateInFindTopDocumentPolicy(std::execution::seq);
+	TestPredicateInFindTopDocumentPolicy(std::execution::par);
+}
+
 //Поиск документов, имеющих заданный статус.
-void TestFindingDocumentsByStatus() {
+template <typename ExecutionPolicy>
+void TestFindingDocumentsByStatusPolicy(const ExecutionPolicy & policy) {
+	std::string policy_str = PolicyToString(policy);
 	// ситуация, когда находим документ по статусу
 	{
 		SearchServer server;
 		server.AddDocument(5, "dog"s, DocumentStatus::BANNED, {7, 2, 7});
-		auto result_by_status = server.FindTopDocuments("dog"s, DocumentStatus::BANNED);
-		ASSERT_EQUAL(result_by_status.size(), 1u);
-		ASSERT_EQUAL(result_by_status.at(0).id, 5);
+		auto result_by_status = server.FindTopDocuments(policy, "dog"s, DocumentStatus::BANNED);
+		ASSERT_EQUAL_HINT(result_by_status.size(), 1u, policy_str);
+		ASSERT_EQUAL_HINT(result_by_status.at(0).id, 5, policy_str);
 	}
 	// ситуация, когда подходящих документов нет
 	{
 		SearchServer server;
 		server.AddDocument(5, "dog"s, DocumentStatus::BANNED, {7, 2, 7});
-		auto result_by_status = server.FindTopDocuments("dog"s, DocumentStatus::REMOVED);
+		auto result_by_status = server.FindTopDocuments(policy,"dog"s, DocumentStatus::REMOVED);
 		ASSERT_HINT(result_by_status.empty(),
-			"Result must be empty, if we don't have documents with requested status"s);
+			"Result must be empty, if we don't have documents with requested status"s + policy_str);
 	}
+}
+
+void TestFindingDocumentsByStatus() {
+	TestFindingDocumentsByStatusPolicy(std::execution::seq);
+	TestFindingDocumentsByStatusPolicy(std::execution::par);
 }
 
 //Корректное вычисление релевантности найденных документов.
@@ -317,7 +356,7 @@ void TestWordsTfInDocument() {
 	search_server.AddDocument(doc_id, "big dog big eyes"s, DocumentStatus::ACTUAL, {7, 2, 7});
 
 	// Проверяему существующий документ
-	std::map<std::string, double> words_tf = {
+	std::map<std::string_view, double> words_tf = {
 		{"big", 2.0 / 4.0},
 		{"dog", 1.0 / 4.0},
 		{"eyes", 1.0 / 4.0},
@@ -325,7 +364,7 @@ void TestWordsTfInDocument() {
 	ASSERT_EQUAL(search_server.GetWordFrequencies(doc_id), words_tf);
 
 	// Проверяему нусуществующий документ
-	std::map<std::string, double> words_tf_empty = {};
+	std::map<std::string_view, double> words_tf_empty = {};
 	ASSERT_EQUAL(search_server.GetWordFrequencies(2), words_tf_empty);
 }
 
@@ -393,6 +432,19 @@ void TestCreateSearchServer() {
 		}
 		ASSERT_HINT(has_invalid_argument_exception_in_container,
 			"Stop words with special characters must generate invalid_argument exception"s);
+	}
+
+	//Проверяем создание из string_view
+	{
+		std::string_view stop_words {"dog"s};
+		bool has_exception_without_special_char_in_string = false;
+		try {
+			SearchServer search_server(stop_words);
+		} catch (...) {
+			has_exception_without_special_char_in_string = true;
+		}
+		ASSERT_HINT(!has_exception_without_special_char_in_string,
+			"Stop words without special characters must not generate invalid_argument exception"s);
 	}
 }
 
@@ -466,47 +518,55 @@ void TestAddingDocuments() {
 }
 
 // Тест проверяет корректность кодов возврата метода FindTopDocuments
-void TestReturnCodesFromFindTopDocuments() {
+template <typename ExecutionPolicy>
+void TestReturnCodesFromFindTopDocumentsPolicy(const ExecutionPolicy & policy) {
+	std::string policy_str = PolicyToString(policy);
+
 	SearchServer search_server;
 	search_server.AddDocument(3, "lion"s, DocumentStatus::ACTUAL, {1});
 	// В корректном запросе отсутствуют исключения
 	bool has_exception_if_find_correct_query = false;
 	try {
-		search_server.FindTopDocuments("black -cat"s);
+		search_server.FindTopDocuments(policy,"black -cat"s);
 	} catch (...) {
 		has_exception_if_find_correct_query = true;
 	}
-	ASSERT(!has_exception_if_find_correct_query);
+	ASSERT_HINT(!has_exception_if_find_correct_query, policy_str);
 
 	// Проверяем исключение, если минус-слово содержит 2 минуса подряд
 	bool has_invalid_argument_exception_if_find_two_minus = false;
 	try {
-		search_server.FindTopDocuments("black --cat"s);
+		search_server.FindTopDocuments(policy, "black --cat"s);
 	} catch (const std::invalid_argument & exception) {
 		has_invalid_argument_exception_if_find_two_minus = true;
 	} catch (...) {
 	}
-	ASSERT(has_invalid_argument_exception_if_find_two_minus);
+	ASSERT_HINT(has_invalid_argument_exception_if_find_two_minus, policy_str);
 
 	// Проверяем исключение, если в запросе пустое минус-слово
 	bool has_invalid_argument_exception_if_find_empty_minus = false;
 	try {
-		search_server.FindTopDocuments("black -"s);
+		search_server.FindTopDocuments(policy, "black -"s);
 	} catch (const std::invalid_argument & exception) {
 		has_invalid_argument_exception_if_find_empty_minus = true;
 	} catch (...) {
 	}
-	ASSERT(has_invalid_argument_exception_if_find_empty_minus);
+	ASSERT_HINT(has_invalid_argument_exception_if_find_empty_minus, policy_str);
 
 	// Проверяем исключение, если в запросе слово со спец.символами
 	bool has_invalid_argument_exception_if_find_special_characters = false;
 	try {
-		search_server.FindTopDocuments("do\x12g"s);
+		search_server.FindTopDocuments(policy, "do\x12g"s);
 	} catch (const std::invalid_argument & exception) {
 		has_invalid_argument_exception_if_find_special_characters = true;
 	} catch (...) {
 	}
-	ASSERT(has_invalid_argument_exception_if_find_special_characters);
+	ASSERT_HINT(has_invalid_argument_exception_if_find_special_characters, policy_str);
+}
+
+void TestReturnCodesFromFindTopDocuments() {
+	TestReturnCodesFromFindTopDocumentsPolicy(std::execution::seq);
+	TestReturnCodesFromFindTopDocumentsPolicy(std::execution::par);
 }
 
 // Тест функций begin и end
@@ -530,7 +590,10 @@ void TestBeginEnd() {
 }
 
 // Тест проверяет корректность удаление документа
-void TestRemoveDocument() {
+template <typename ExecutionPolicy>
+void TestRemoveDocumentPolicy(const ExecutionPolicy & policy) {
+	std::string policy_str = PolicyToString(policy);
+
 	SearchServer search_server;
 	int before_id = 1;
 	int deleted_id = 3;
@@ -538,29 +601,39 @@ void TestRemoveDocument() {
 	search_server.AddDocument(before_id, "dog and cat"s, DocumentStatus::ACTUAL, {1});
 	search_server.AddDocument(deleted_id, "cat"s, DocumentStatus::ACTUAL, {1});
 	search_server.AddDocument(after_id, "cat"s, DocumentStatus::ACTUAL, {1});
-	search_server.RemoveDocument(deleted_id);
+	search_server.RemoveDocument(policy, deleted_id);
 
 	// Проверяем, что после удаления уменьшилось количество документов
-	ASSERT_EQUAL(search_server.GetDocumentCount(), 2);
+	ASSERT_EQUAL_HINT(search_server.GetDocumentCount(), 2, policy_str);
 
 	// Проверяем, что после удаления id не доступен через итератор
 	std::vector<int> after_deleting_ids = {before_id, after_id};
 	unsigned i = 0;
 	for (auto doc_id : search_server) {
-		ASSERT_EQUAL(doc_id, after_deleting_ids.at(i));
+		ASSERT_EQUAL_HINT(doc_id, after_deleting_ids.at(i), policy_str);
 		++i;
 	}
 
-	// Проверяем, что matching возвращает пустой вектор слов по удалённому id
-	auto [matching_string, status] = search_server.MatchDocument("cat"s, deleted_id);
-	std::vector<std::string> empty_matching = {};
-	ASSERT_EQUAL(matching_string, empty_matching);
+	// Проверяем, что matching бросает исключение по удалённому id
+	bool has_out_of_range_exception_if_document_id_not_exist = false;
+	try {
+		search_server.MatchDocument("cat"s, deleted_id);
+	} catch (const std::out_of_range & exception) {
+		has_out_of_range_exception_if_document_id_not_exist = true;
+	} catch (...) {
+	}
+	ASSERT_HINT(has_out_of_range_exception_if_document_id_not_exist, policy_str);
 
 	// Проверяем, что FindTopDocuments не находит удаленный документ
 	auto finding_result = search_server.FindTopDocuments("cat"s);
-	ASSERT_EQUAL(finding_result.size(), 2u);
-	ASSERT_EQUAL(finding_result.at(0).id, before_id);
-	ASSERT_EQUAL(finding_result.at(1).id, after_id);
+	ASSERT_EQUAL_HINT(finding_result.size(), 2u, policy_str);
+	ASSERT_EQUAL_HINT(finding_result.at(0).id, before_id, policy_str);
+	ASSERT_EQUAL_HINT(finding_result.at(1).id, after_id, policy_str);
+}
+
+void TestRemoveDocument() {
+	TestRemoveDocumentPolicy(std::execution::seq);
+	TestRemoveDocumentPolicy(std::execution::par);
 }
 
 void TestSearchServer() {
