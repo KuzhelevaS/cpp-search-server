@@ -18,6 +18,8 @@ inline constexpr double EPSILON = 1e-6;
 
 class SearchServer {
 public:
+	using MatchedDocuments = std::tuple<std::vector<std::string_view>, DocumentStatus>;
+
 	explicit SearchServer(const std::string & text = std::string(""));
 	explicit SearchServer(std::string_view text);
 
@@ -31,7 +33,7 @@ public:
 	std::vector<Document> FindTopDocuments(std::string_view raw_query,
 		DocumentStatus status = DocumentStatus::ACTUAL) const;
 	template <typename ExecutionPolicy>
-    std::vector<Document> FindTopDocuments(const ExecutionPolicy & policy,
+	std::vector<Document> FindTopDocuments(const ExecutionPolicy & policy,
 		std::string_view raw_query, DocumentStatus status = DocumentStatus::ACTUAL) const;
 
 	template <typename Filter>
@@ -41,13 +43,10 @@ public:
 		std::string_view raw_query, Filter filter) const;
 
 	// Возвращает статус документа и слова запроса, содержащиеся в документе с заданным ID
-	std::tuple<std::vector<std::string_view>, DocumentStatus> MatchDocument(
+	MatchedDocuments MatchDocument(std::string_view raw_query, int document_id) const;
+	MatchedDocuments MatchDocument(const std::execution::sequenced_policy & seq,
 		std::string_view raw_query, int document_id) const;
-	std::tuple<std::vector<std::string_view>, DocumentStatus> MatchDocument(
-		const std::execution::sequenced_policy & seq,
-		std::string_view raw_query, int document_id) const;
-	std::tuple<std::vector<std::string_view>, DocumentStatus> MatchDocument(
-		const std::execution::parallel_policy & par,
+	MatchedDocuments MatchDocument(const std::execution::parallel_policy & par,
 		std::string_view raw_query, int document_id) const;
 
 	// Возвращает количество документов
@@ -60,13 +59,12 @@ public:
 	const std::map<std::string_view, double> & GetWordFrequencies(int document_id) const;
 
 	void RemoveDocument(int document_id);
-
 	void RemoveDocument(const std::execution::sequenced_policy & seq, int document_id);
 	void RemoveDocument(const std::execution::parallel_policy & par, int document_id);
 
 
 private:
-	std::deque<std::string> storage;
+	std::deque<std::string> storage_;
 	std::set<std::string, std::less<>> stop_words_;
 
 	struct DocumentInfo {
@@ -103,7 +101,8 @@ private:
 	std::set<std::string, std::less<>> MakeStopWords(const Container & container);
 
 	template <typename Filter>
-	std::vector<Document> FindAllDocuments(const Query& query_words, Filter filter) const;
+	std::vector<Document> FindAllDocuments(const std::execution::sequenced_policy & seq,
+		const Query& query_words, Filter filter) const;
 	template <typename Filter>
 	std::vector<Document> FindAllDocuments(const std::execution::parallel_policy & par,
 		const Query& query_words, Filter filter) const;
@@ -129,11 +128,8 @@ SearchServer::SearchServer(const Container & container)
 
 template <typename ExecutionPolicy>
 std::vector<Document> SearchServer::FindTopDocuments(const ExecutionPolicy & policy,
-    std::string_view raw_query, DocumentStatus status) const
+	std::string_view raw_query, DocumentStatus status) const
 {
-	if constexpr (std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::sequenced_policy>) {
-		return FindTopDocuments(raw_query, status);
-	}
 	return FindTopDocuments(policy, raw_query,
 		[status](int, DocumentStatus document_status, int) {
 			return document_status == status;
@@ -142,34 +138,18 @@ std::vector<Document> SearchServer::FindTopDocuments(const ExecutionPolicy & pol
 
 template <typename Filter>
 std::vector<Document> SearchServer::FindTopDocuments(std::string_view raw_query, Filter filter) const {
-	const Query query_words = ParseQuery(raw_query);
-
-	std::vector<Document> result = FindAllDocuments(query_words, filter);
-
-	std::sort(result.begin(), result.end(),
-		[](const Document & lhs, const Document & rhs) {
-			if (std::abs(lhs.relevance - rhs.relevance) < EPSILON) {
-				return lhs.rating > rhs.rating;
-			}
-			return lhs.relevance > rhs.relevance;
-		});
-
-	if (result.size() > MAX_RESULT_DOCUMENT_COUNT) {
-		result.resize(MAX_RESULT_DOCUMENT_COUNT);
-	}
-	return result;
+	return FindTopDocuments(std::execution::seq , raw_query, filter);
 }
 
 template <typename ExecutionPolicy, typename Filter>
 std::vector<Document> SearchServer::FindTopDocuments(const ExecutionPolicy & policy,
-    std::string_view raw_query, Filter filter) const
+	std::string_view raw_query, Filter filter) const
 {
-	if constexpr (std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::sequenced_policy>) {
-		return FindTopDocuments(raw_query, filter);
-	}
 	Query query_words = ParseQuery(raw_query, false);
 	SortAndRemoveDuplicates(policy, query_words.plus_words);
-	std::vector<Document> result = FindAllDocuments(std::execution::par, query_words, filter);
+	SortAndRemoveDuplicates(policy, query_words.minus_words);
+
+	std::vector<Document> result = FindAllDocuments(policy, query_words, filter);
 
 	std::sort(policy, result.begin(), result.end(),
 		[](const Document & lhs, const Document & rhs) {
@@ -202,7 +182,10 @@ std::set<std::string, std::less<>> SearchServer::MakeStopWords(const Container &
 }
 
 template <typename Filter>
-std::vector<Document> SearchServer::FindAllDocuments(const Query & query_words, Filter filter) const {
+std::vector<Document> SearchServer::FindAllDocuments(
+	[[maybe_unused]] const std::execution::sequenced_policy & seq,
+	const Query & query_words, Filter filter) const
+{
 	std::map<int, double> matched_documents;
 	for(const auto & plus : query_words.plus_words) {
 		// нужно, т.к. дальше вызываем documents_with_tf_.at()
@@ -240,7 +223,7 @@ std::vector<Document> SearchServer::FindAllDocuments(const Query & query_words, 
 
 template <typename Filter>
 std::vector<Document> SearchServer::FindAllDocuments(const std::execution::parallel_policy & par,
-    const Query& query_words, Filter filter) const
+	const Query& query_words, Filter filter) const
 {
 	ConcurrentMap<int, double> concurrent_matched_documents(100);
 	std::for_each(par, query_words.plus_words.begin(), query_words.plus_words.end(),
@@ -289,4 +272,3 @@ bool SearchServer::IsValidAllWords(WordsContainer & words) {
 	}
 	return true;
 }
-

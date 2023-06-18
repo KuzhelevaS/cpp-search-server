@@ -25,12 +25,14 @@ void SearchServer::AddDocument(int document_id, std::string_view document,
 		throw std::invalid_argument("Document with this id already exists");
 	}
 
-	storage.emplace_back(document);
-	const std::vector<std::string_view> words = SplitIntoWordsNoStop(storage.back());
+	storage_.emplace_back(document);
+	const std::vector<std::string_view> words = SplitIntoWordsNoStop(storage_.back());
 	if (!IsValidAllWords(words)) {
+		storage_.pop_back();
 		throw std::invalid_argument("Document contain special characters");
 	}
 	documents_id_.insert(document_id);
+
 	documents_info_[document_id] = {ComputeAverageRating(ratings), status, {}};
 	double tf_coeff = 1.0 / static_cast<double>(words.size());
 	for(const auto & word : words) {
@@ -48,7 +50,7 @@ std::vector<Document> SearchServer::FindTopDocuments(std::string_view raw_query,
 		});
 }
 
-std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(
+SearchServer::MatchedDocuments SearchServer::MatchDocument(
 	std::string_view raw_query, int document_id) const
 {
 	DocumentStatus result_status = documents_info_.at(document_id).status;
@@ -76,14 +78,14 @@ std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDoc
 	return std::tie(matched_words, result_status);
 }
 
-std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(
+SearchServer::MatchedDocuments SearchServer::MatchDocument(
 	[[maybe_unused]] const std::execution::sequenced_policy & seq,
 	std::string_view raw_query, int document_id) const
 {
 	return SearchServer::MatchDocument(raw_query, document_id);
 }
 
-std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(
+SearchServer::MatchedDocuments SearchServer::MatchDocument(
 	const std::execution::parallel_policy & par,
 	std::string_view raw_query, int document_id) const
 {
